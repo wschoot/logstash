@@ -1,0 +1,86 @@
+# https://www.elastic.co/guide/en/logstash/current/installing-logstash.html
+---
+- hosts: all
+  gather_facts: no
+  tasks:
+    - name: install epel
+      become: true
+      yum:
+        name: epel-release
+        state: latest
+
+    - name: Setup repository
+      become: true
+      yum_repository:
+        name: logstash-7.x
+        description: Elastic repository for 7.x packages
+        baseurl: https://artifacts.elastic.co/packages/7.x/yum
+        gpgcheck: yes
+        metadata_expire_filter: read-only:future
+        gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+
+    - name: Install Logstash
+      become: true
+      yum:
+        name:
+          - logstash
+          - filebeat
+          - java-11-openjdk
+          - tmux
+        state: present
+
+    - name: check if rules file exists
+      stat:
+        path: "${HOME}/logstash-tutorial.log"
+      register: logfile
+
+    - name: Get sample accesslog
+      get_url:
+        url: https://download.elastic.co/demos/logstash/gettingstarted/logstash-tutorial.log.gz
+        dest: "${HOME}/logstash-tutorial.log.gz"
+      when: logfile.stat.exists == False
+
+    - name: Uncompress sample accesslog
+      command: "gunzip ${HOME}/logstash-tutorial.log.gz"
+      args:
+        creates: "${HOME}/logstash-tutorial.log"
+
+    - name: Create pipeline
+      become: true
+      copy:
+        dest: /etc/filebeat/first-pipeline.yml
+        content: |
+          input {
+            beats {
+              port => "5044"
+            }
+          }
+          output {
+            stdout { codec => rubydebug }
+          }
+
+    - name: Create configfile
+      become: true
+      copy:
+        dest: /etc/filebeat/filebeat.yml
+        content: |
+          filebeat.inputs:
+          - type: log
+            paths:
+              - ~vagrant/logstash-tutorial.log
+          output.logstash:
+            hosts: ["localhost:5044"]
+
+    - name: Create motd
+      become: true
+      copy:
+        dest: /etc/motd
+        content: |
+          https://www.elastic.co/guide/en/logstash/current/advanced-pipeline.html
+
+          # sudo filebeat -e -d "publish"
+          # sudo /usr/share/logstash/bin/logstash -f /etc/filebeat/first-pipeline.yml --config.reload.automatic
+
+          tmux new-session \; \
+            new-window -n logstash 'sudo filebeat -e -d "publish"' \; \
+            split-window 'sudo /usr/share/logstash/bin/logstash -f /etc/filebeat/first-pipeline.yml --config.reload.automatic'
