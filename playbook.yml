@@ -1,14 +1,16 @@
 # https://www.elastic.co/guide/en/logstash/current/installing-logstash.html
 ---
 - hosts: all
+  vars_files:
+    - vars/main.yml
   gather_facts: no
   tasks:
-    - name: install epel
-      become: true
-      yum:
-        name: epel-release
-        state: latest
-
+#    - name: install epel
+#      become: true
+#      yum:
+#        name: epel-release
+#        state: latest
+#
     - name: Setup repository
       become: true
       yum_repository:
@@ -18,15 +20,52 @@
         gpgcheck: yes
         metadata_expire_filter: read-only:future
         gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
-
+#
+#    - fail:
+#
     - name: Install Logstash
       become: true
       yum:
         name:
-          - logstash
-          - filebeat
-          - java-11-openjdk
-          - tmux
+          - /vagrant/files/epel-release-7-12.noarch.rpm
+          - /vagrant/files/kibana-7.4.2-x86_64.rpm
+          - /vagrant/files/elasticsearch-7.4.2-x86_64.rpm
+          - /vagrant/files/filebeat-7.4.2-x86_64.rpm
+          - /vagrant/files/logstash-7.4.2.rpm
+          - /vagrant/files/tzdata-java-2019c-1.el7.noarch.rpm
+          - /vagrant/files/libXi-1.7.9-1.el7.x86_64.rpm
+          - /vagrant/files/dejavu-fonts-common-2.33-6.el7.noarch.rpm
+          - /vagrant/files/libX11-1.6.7-2.el7.x86_64.rpm
+          - /vagrant/files/libXtst-1.2.3-1.el7.x86_64.rpm
+          - /vagrant/files/dejavu-sans-fonts-2.33-6.el7.noarch.rpm
+          - /vagrant/files/fontpackages-filesystem-1.44-8.el7.noarch.rpm
+          - /vagrant/files/libxcb-1.13-1.el7.x86_64.rpm
+          - /vagrant/files/libX11-common-1.6.7-2.el7.noarch.rpm
+          - /vagrant/files/libICE-1.0.9-9.el7.x86_64.rpm
+          - /vagrant/files/java-11-openjdk-headless-11.0.5.10-0.el7_7.x86_64.rpm
+          - /vagrant/files/pcsc-lite-libs-1.8.8-8.el7.x86_64.rpm
+          - /vagrant/files/libXext-1.3.3-3.el7.x86_64.rpm
+          - /vagrant/files/libSM-1.2.2-2.el7.x86_64.rpm
+          - /vagrant/files/libXau-1.0.8-2.1.el7.x86_64.rpm
+          - /vagrant/files/xorg-x11-fonts-Type1-7.5-9.el7.noarch.rpm
+          - /vagrant/files/libXrender-0.9.10-1.el7.x86_64.rpm
+          - /vagrant/files/javapackages-tools-3.4.1-11.el7.noarch.rpm
+          - /vagrant/files/libfontenc-1.1.3-3.el7.x86_64.rpm
+          - /vagrant/files/python-javapackages-3.4.1-11.el7.noarch.rpm
+          - /vagrant/files/elasticsearch-7.4.2-x86_64.rpm
+          - /vagrant/files/alsa-lib-1.1.8-1.el7.x86_64.rpm
+          - /vagrant/files/python-lxml-3.2.1-4.el7.x86_64.rpm
+          - /vagrant/files/libjpeg-turbo-1.2.90-8.el7.x86_64.rpm
+          - /vagrant/files/giflib-4.1.6-9.el7.x86_64.rpm
+          - /vagrant/files/filebeat-7.4.2-x86_64.rpm
+          - /vagrant/files/logstash-7.4.2.rpm
+          - /vagrant/files/lksctp-tools-1.0.17-2.el7.x86_64.rpm
+          - /vagrant/files/ttmkfdir-3.0.9-42.el7.x86_64.rpm
+          - /vagrant/files/fontconfig-2.13.0-4.3.el7.x86_64.rpm
+          - /vagrant/files/java-11-openjdk-11.0.5.10-0.el7_7.x86_64.rpm
+          - /vagrant/files/copy-jdk-configs-3.3-10.el7_5.noarch.rpm
+          - /vagrant/files/xorg-x11-font-utils-7.5-21.el7.x86_64.rpm
+          - /vagrant/files/tmux-1.8-4.el7.x86_64.rpm
         state: present
 
     - name: check if rules file exists
@@ -38,7 +77,7 @@
       get_url:
         url: https://download.elastic.co/demos/logstash/gettingstarted/logstash-tutorial.log.gz
         dest: "${HOME}/logstash-tutorial.log.gz"
-      when: logfile.stat.exists == False
+      when: not logfile.stat.exists
 
     - name: Uncompress sample accesslog
       command: "gunzip ${HOME}/logstash-tutorial.log.gz"
@@ -51,13 +90,37 @@
         dest: /etc/filebeat/first-pipeline.yml
         content: |
           input {
+            twitter {
+              consumer_key => "{{ consumer_key }}"
+              consumer_secret => "{{ consumer_secret }}"
+              keywords => ["tesorion", "cloud"]
+              oauth_token => "{{ oauth_token }}"
+              oauth_token_secret => "{{ oauth_token_secret }}"
+            }
             beats {
               port => "5044"
             }
           }
+          filter {
+            grok {
+              match => { "message" => "%{COMBINEDAPACHELOG}"}
+            }
+            geoip {
+              source => "clientip"
+            }
+          }
           output {
             stdout { codec => rubydebug }
+            file { path => "/home/vagrant/output" }
+            elasticsearch {
+              hosts => [ "localhost:9200" ]
+            }
           }
+
+    - name: Copy tmux.conf
+      copy:
+        src: /home/wouter/.tmux.conf
+        dest: /home/vagrant/.tmux.conf
 
     - name: Create configfile
       become: true
@@ -67,9 +130,18 @@
           filebeat.inputs:
           - type: log
             paths:
-              - ~vagrant/logstash-tutorial.log
+              - /home/vagrant/logstash-tutorial.log
           output.logstash:
             hosts: ["localhost:5044"]
+
+    - name: start elasticsearch
+      become: true
+      systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+      - elasticsearch
+      - kibana
 
     - name: Create motd
       become: true
@@ -78,9 +150,9 @@
         content: |
           https://www.elastic.co/guide/en/logstash/current/advanced-pipeline.html
 
-          # sudo filebeat -e -d "publish"
-          # sudo /usr/share/logstash/bin/logstash -f /etc/filebeat/first-pipeline.yml --config.reload.automatic
+          http://localhost:5601/app/kibana
 
           tmux new-session \; \
-            new-window -n logstash 'sudo filebeat -e -d "publish"' \; \
-            split-window 'sudo /usr/share/logstash/bin/logstash -f /etc/filebeat/first-pipeline.yml --config.reload.automatic'
+            new-window -n logstash 'sleep 2 && sudo /usr/share/logstash/bin/logstash -f /etc/filebeat/first-pipeline.yml --config.reload.automatic' \; \
+            new-window -n filebeat 'sleep 5 && sudo filebeat -e -d "publish"'  \; \
+            new-window -n setup 'sleep 10 && sudo filebeat setup --index-management -E output.logstash.enabled=false -E output.elasticsearch.hosts=["localhost:9200"]'
